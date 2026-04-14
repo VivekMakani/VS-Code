@@ -4,6 +4,7 @@ import { useCsvImport, IMPORT_PHASES } from '../hooks/useCsvImport';
 import { useStorage } from '../store/StorageContext';
 import { BANK_OPTIONS } from '../constants/banks';
 import EmptyState from '../components/common/EmptyState';
+import { exportRulebook, parseRulebookFile } from '../services/rulebookImportExport';
 
 // ─── Bank Selector ───────────────────────────────────────────────────────────
 
@@ -137,11 +138,186 @@ function ImportPreviewTable({ rows, duplicateFlags, selectedRows, onToggleRow, o
   );
 }
 
+// ─── Rulebook Backup Tab ─────────────────────────────────────────────────────
+
+function RulebookBackupTab() {
+  const { rules, categories, importRulebook } = useStorage();
+  const fileRef = useRef();
+  const [dragOver, setDragOver] = useState(false);
+  const [parsed, setParsed] = useState(null);   // { rules, categories, exportedAt }
+  const [parseError, setParseError] = useState('');
+  const [mode, setMode] = useState('merge');     // 'merge' | 'replace'
+  const [done, setDone] = useState(null);        // { rules, categories } counts
+
+  function handleFile(file) {
+    if (!file) return;
+    setParseError('');
+    setParsed(null);
+    setDone(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const result = parseRulebookFile(e.target.result);
+        setParsed(result);
+      } catch (err) {
+        setParseError(err.message);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    handleFile(e.dataTransfer.files?.[0]);
+  }
+
+  function handleConfirm() {
+    importRulebook({ rules: parsed.rules, categories: parsed.categories, mode });
+    setDone({ rules: parsed.rules.length, categories: parsed.categories.length });
+    setParsed(null);
+  }
+
+  function reset() {
+    setParsed(null);
+    setParseError('');
+    setDone(null);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 780 }}>
+
+      {/* Export card */}
+      <div className="card">
+        <div className="card-header"><h3>⬇️ Export Current Rulebook</h3></div>
+        <div className="card-body" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+          <div>
+            <p className="text-sm" style={{ marginBottom: 4 }}>
+              Download your rules and categories as a <code>.json</code> file. Use it to restore them on another device or after clearing browser data.
+            </p>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+              <span className="badge badge-neutral">📌 {rules.length} rules</span>
+              <span className="badge badge-neutral">🏷️ {categories.length} categories</span>
+            </div>
+          </div>
+          <button className="btn btn-primary" onClick={() => exportRulebook(rules, categories)}>
+            ⬇️ Download rulebook.json
+          </button>
+        </div>
+      </div>
+
+      {/* Import card */}
+      <div className="card">
+        <div className="card-header"><h3>⬆️ Import Rulebook</h3></div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {done ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center', padding: '24px 0' }}>
+              <div style={{ fontSize: '3rem' }}>✅</div>
+              <h3>Rulebook Imported!</h3>
+              <div style={{ display: 'flex', gap: 12 }}>
+                <span className="badge badge-success">📌 {done.rules} rules</span>
+                <span className="badge badge-success">🏷️ {done.categories} categories</span>
+              </div>
+              <p className="text-sm text-muted">
+                {mode === 'replace' ? 'All existing rules and categories were replaced.' : 'New rules and categories were merged with existing ones.'}
+              </p>
+              <button className="btn btn-secondary" onClick={reset}>Import Another File</button>
+            </div>
+          ) : parsed ? (
+            // Preview + confirmation
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div className="alert alert-info">
+                <span>📄</span>
+                <div>
+                  <strong>File parsed successfully</strong>
+                  {parsed.exportedAt && <div className="text-sm text-muted">Exported on {new Date(parsed.exportedAt).toLocaleString()}</div>}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
+                    <span className="badge badge-neutral">📌 {parsed.rules.length} rules</span>
+                    <span className="badge badge-neutral">🏷️ {parsed.categories.length} categories</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Import mode</label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                    <input type="radio" name="import-mode" value="merge" checked={mode === 'merge'}
+                      onChange={() => setMode('merge')} style={{ marginTop: 3 }} />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Merge (recommended)</div>
+                      <div className="text-xs text-muted">Add rules and categories from the file. Items already in your rulebook by ID are skipped — nothing is overwritten.</div>
+                    </div>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
+                    <input type="radio" name="import-mode" value="replace" checked={mode === 'replace'}
+                      onChange={() => setMode('replace')} style={{ marginTop: 3 }} />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>Replace all</div>
+                      <div className="text-xs text-muted">Discard your current rules and categories entirely and replace them with the file contents.</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {mode === 'replace' && (
+                <div className="alert alert-warning">
+                  <span>⚠️</span>
+                  <span><strong>This will delete your current {rules.length} rules and {categories.length} categories</strong> and replace them with the file contents.</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" onClick={reset}>← Back</button>
+                <button className="btn btn-primary" onClick={handleConfirm}>
+                  {mode === 'replace' ? '🔄 Replace & Import' : '➕ Merge & Import'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            // Drop zone
+            <>
+              {parseError && (
+                <div className="alert alert-danger">
+                  <span>❌</span>
+                  <span>{parseError}</span>
+                </div>
+              )}
+              <div
+                className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={handleDrop}
+                onClick={() => fileRef.current?.click()}
+              >
+                <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>📂</div>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Drop your rulebook .json file here or click to browse</div>
+                <div className="text-sm text-muted">Only .json files exported from this app are supported</div>
+                <input ref={fileRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+                  onChange={e => handleFile(e.target.files?.[0])} />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="alert alert-info">
+        <span>💡</span>
+        <div>
+          <strong>Tip:</strong> Export your rulebook after setting up all your custom rules and categories. Next time you set up the app on a new browser or device, import that file to restore everything instantly — no manual re-entry needed.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function RawImportPage() {
   const navigate = useNavigate();
   const { categories } = useStorage();
+  const [activeTab, setActiveTab] = useState('csv');
   const {
     phase, bankId, setBankId,
     normalizedRows, duplicateFlags, parseErrors,
@@ -155,11 +331,26 @@ export default function RawImportPage() {
     <div>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ marginBottom: 4 }}>📥 Raw Import</h1>
-        <p className="text-muted text-sm">Import CSV statements from your bank. Transactions will be auto-categorized and added to the Unified Ledger.</p>
+        <p className="text-muted text-sm">Import bank CSV statements or restore a saved rulebook backup.</p>
       </div>
 
-      {/* IDLE: bank select + upload */}
+      {/* Tab bar — only shown when not mid-import */}
       {phase === IMPORT_PHASES.IDLE && (
+        <div className="tab-bar" style={{ marginBottom: 24 }}>
+          <button className={`tab-item ${activeTab === 'csv' ? 'active' : ''}`} onClick={() => setActiveTab('csv')}>
+            🏦 Bank CSV
+          </button>
+          <button className={`tab-item ${activeTab === 'rulebook' ? 'active' : ''}`} onClick={() => setActiveTab('rulebook')}>
+            📚 Rulebook Backup
+          </button>
+        </div>
+      )}
+
+      {/* Rulebook Backup tab */}
+      {phase === IMPORT_PHASES.IDLE && activeTab === 'rulebook' && <RulebookBackupTab />}
+
+      {/* IDLE: bank select + upload */}
+      {phase === IMPORT_PHASES.IDLE && activeTab === 'csv' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 780 }}>
           <div className="card">
             <div className="card-header"><h3>Step 1 — Select Your Bank</h3></div>

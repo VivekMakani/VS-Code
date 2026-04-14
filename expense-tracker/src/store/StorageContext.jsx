@@ -239,6 +239,37 @@ export function StorageProvider({ children }) {
     dispatchCats({ type: 'DELETE_SUBCATEGORY', categoryId, id });
   }, []);
 
+  // ─── Rulebook Import Action ───────────────────────────────────────────────
+
+  const importRulebook = useCallback(({ rules: newRules, categories: newCats, mode }) => {
+    if (mode === 'replace') {
+      dispatchRules({ type: 'SET', payload: newRules });
+      dispatchCats({ type: 'SET', payload: newCats });
+      return;
+    }
+
+    // Merge mode: add only items whose IDs don't already exist
+    const existingRuleIds = new Set(rules.map(r => r.id));
+    newRules
+      .filter(r => !existingRuleIds.has(r.id))
+      .forEach(r => dispatchRules({ type: 'ADD', payload: r }));
+
+    const existingCatMap = new Map(categories.map(c => [c.id, c]));
+    newCats.forEach(c => {
+      if (!existingCatMap.has(c.id)) {
+        // Brand new category — add it whole (subcategories included)
+        dispatchCats({ type: 'ADD_CATEGORY', payload: { ...c, subcategories: c.subcategories || [] } });
+      } else {
+        // Existing category — merge subcategories only
+        const existing = existingCatMap.get(c.id);
+        const existingSubIds = new Set(existing.subcategories.map(s => s.id));
+        (c.subcategories || [])
+          .filter(s => !existingSubIds.has(s.id))
+          .forEach(s => dispatchCats({ type: 'ADD_SUBCATEGORY', categoryId: c.id, payload: s }));
+      }
+    });
+  }, [rules, categories]);
+
   // ─── Settings Actions ─────────────────────────────────────────────────────
 
   const updateSettings = useCallback((changes) => {
@@ -259,7 +290,7 @@ export function StorageProvider({ children }) {
     addRule, updateRule, deleteRule, reorderRules,
     addCategory, updateCategory, deleteCategory,
     addSubcategory, updateSubcategory, deleteSubcategory,
-    updateSettings, addImportBatch,
+    updateSettings, addImportBatch, importRulebook,
   };
 
   return <StorageContext.Provider value={value}>{children}</StorageContext.Provider>;
