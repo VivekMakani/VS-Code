@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { exportSummaryPDF, exportLedgerPDF } from '../services/pdfExporter';
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area,
   PieChart, Pie, Cell,
@@ -54,6 +55,66 @@ function loadWidgets() {
 
 function saveWidgets(w) {
   try { localStorage.setItem('exp_dashboard_widgets', JSON.stringify(w)); } catch {}
+}
+
+// ─── Export PDF Dropdown ──────────────────────────────────────────────────────
+
+function ExportPDFButton({ onSummary, onLedger, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        className="btn btn-secondary btn-sm"
+        onClick={() => setOpen(v => !v)}
+        disabled={disabled}
+        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+      >
+        📄 Export PDF <span style={{ fontSize: '0.7rem' }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 200,
+          background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-lg)',
+          minWidth: 230, overflow: 'hidden',
+        }}>
+          <button
+            className="btn btn-ghost"
+            style={{ width: '100%', justifyContent: 'flex-start', padding: '12px 16px', borderRadius: 0, gap: 10 }}
+            onClick={() => { onSummary(); setOpen(false); }}
+          >
+            <span style={{ fontSize: '1.2rem' }}>📊</span>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Summary Report</div>
+              <div className="text-xs text-muted">2-page PDF · stats, charts, top expenses</div>
+            </div>
+          </button>
+          <div style={{ height: 1, background: 'var(--color-border)' }} />
+          <button
+            className="btn btn-ghost"
+            style={{ width: '100%', justifyContent: 'flex-start', padding: '12px 16px', borderRadius: 0, gap: 10 }}
+            onClick={() => { onLedger(); setOpen(false); }}
+          >
+            <span style={{ fontSize: '1.2rem' }}>📋</span>
+            <div style={{ textAlign: 'left' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>Ledger Table</div>
+              <div className="text-xs text-muted">Landscape PDF · full transaction table</div>
+            </div>
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Date Filter Control ──────────────────────────────────────────────────────
@@ -620,6 +681,18 @@ export default function DashboardPage() {
           >
             🎛️ Customize
           </button>
+          <ExportPDFButton
+            disabled={!rangeReady}
+            onSummary={() => exportSummaryPDF({
+              affordability, categoryTotals, monthlyBuckets, ytdSummary,
+              topExpenses, recurringVendors, splitSavings, rollingTrend,
+              settings, dateFilter, categories,
+            })}
+            onLedger={() => exportLedgerPDF(filteredTxn, categories,
+              dateFilter.mode === 'month' ? dateFilter.month :
+              dateFilter.mode === 'range' ? `${dateFilter.start} to ${dateFilter.end}` : 'All Time'
+            )}
+          />
         </div>
       </div>
 

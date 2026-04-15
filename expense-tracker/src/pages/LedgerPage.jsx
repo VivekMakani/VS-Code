@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useStorage } from '../store/StorageContext';
 import { exportTransactionsToCSV } from '../services/csvExporter';
+import { exportLedgerPDF } from '../services/pdfExporter';
 import { categorizeBatch } from '../services/rulesEngine';
 import { calcMyShare, calcSplitSavings } from '../services/splitCalculator';
 import { SPLIT_TYPES } from '../constants/splitTypes';
@@ -302,6 +303,7 @@ export default function LedgerPage() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-secondary" onClick={handleRecategorizeAll} title="Re-apply all rules to existing transactions">🔄 Re-Categorize All</button>
           <button className="btn btn-secondary" onClick={() => exportTransactionsToCSV(filtered, categories)}>⬇️ Export CSV</button>
+          <button className="btn btn-secondary" onClick={() => exportLedgerPDF(filtered, categories, filterMonth || 'All Transactions')}>📄 Export PDF</button>
           <button className="btn btn-primary" onClick={() => setAddModal(true)}>+ Add Manual</button>
         </div>
       </div>
