@@ -1,4 +1,4 @@
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -24,7 +24,6 @@ const A4_LW = 297; // landscape width
 const A4_LH = 210; // landscape height
 const M     = 14;  // margin
 const CW    = A4_W - 2 * M;  // content width (portrait)
-const CWL   = A4_LW - 2 * M; // content width (landscape)
 
 const money = (n) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n || 0);
@@ -215,7 +214,7 @@ function miniBarChart(doc, data, y, chartH = 36, pageW = A4_W) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function exportSummaryPDF({
-  affordability, categoryTotals, monthlyBuckets, ytdSummary,
+  affordability, categoryTotals, ytdSummary,
   topExpenses, recurringVendors, splitSavings, rollingTrend,
   settings, dateFilter, categories,
 }) {
