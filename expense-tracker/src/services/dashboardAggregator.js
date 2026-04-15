@@ -114,6 +114,127 @@ export function buildYTDSummary(transactions, fiscalYearStartMonth = 1) {
 }
 
 /**
+ * Build daily spending totals between startDate and endDate (inclusive, 'YYYY-MM-DD').
+ * Returns array of { date, label, amount }.
+ */
+export function buildDailySpending(transactions, startDate, endDate) {
+  if (!startDate || !endDate) return [];
+  const daily = {};
+  const cur = new Date(startDate + 'T12:00:00');
+  const last = new Date(endDate + 'T12:00:00');
+  while (cur <= last) {
+    daily[cur.toISOString().slice(0, 10)] = 0;
+    cur.setDate(cur.getDate() + 1);
+  }
+  transactions.forEach(t => {
+    if (t.excluded || t.transactionType !== 'Debit') return;
+    if (t.date && Object.prototype.hasOwnProperty.call(daily, t.date))
+      daily[t.date] += t.myShare || 0;
+  });
+  return Object.entries(daily).map(([date, amount]) => {
+    const d = new Date(date + 'T12:00:00');
+    return { date, label: d.toLocaleDateString('default', { month: 'short', day: 'numeric' }), amount: Math.round(amount * 100) / 100 };
+  });
+}
+
+/**
+ * Build spending aggregated by day of week (Sun–Sat).
+ * Returns array of 7 items: { day, total, avg, count }.
+ */
+export function buildDayOfWeekSpending(transactions, startDate, endDate) {
+  const totals = new Array(7).fill(0);
+  const counts = new Array(7).fill(0);
+  transactions.forEach(t => {
+    if (t.excluded || t.transactionType !== 'Debit' || !t.date) return;
+    if (startDate && t.date < startDate) return;
+    if (endDate && t.date > endDate) return;
+    const dow = new Date(t.date + 'T12:00:00').getDay();
+    totals[dow] += t.myShare || 0;
+    counts[dow]++;
+  });
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day, i) => ({
+    day,
+    total: Math.round(totals[i] * 100) / 100,
+    avg: counts[i] > 0 ? Math.round((totals[i] / counts[i]) * 100) / 100 : 0,
+    count: counts[i],
+  }));
+}
+
+/**
+ * Build top-N category trend over the last numMonths months (always from today, ignores date filter).
+ * Returns { data: [{ month, label, [catName]: amount }], categories: [{ id, name, color, icon }] }
+ */
+export function buildCategoryTrend(transactions, categories, numMonths = 6, topN = 5) {
+  const now = new Date();
+  const months = [];
+  for (let i = numMonths - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    months.push({ key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleString('default', { month: 'short', year: '2-digit' }) });
+  }
+  const monthKeys = new Set(months.map(m => m.key));
+
+  // Find top N categories by total across the period
+  const catTotals = {};
+  transactions.forEach(t => {
+    if (t.excluded || t.transactionType !== 'Debit') return;
+    const month = t.date?.slice(0, 7);
+    if (!month || !monthKeys.has(month)) return;
+    const catId = t.categoryId || 'cat_uncategorized';
+    catTotals[catId] = (catTotals[catId] || 0) + (t.myShare || 0);
+  });
+  const topCatIds = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, topN).map(([id]) => id);
+  const catMeta = topCatIds.map(catId => {
+    const cat = categories.find(c => c.id === catId);
+    return { id: catId, name: cat?.name || 'Other', color: cat?.color || '#6b7280', icon: cat?.icon || '' };
+  });
+
+  const data = months.map(({ key, label }) => {
+    const row = { month: key, label };
+    catMeta.forEach(c => { row[c.name] = 0; });
+    transactions
+      .filter(t => !t.excluded && t.transactionType === 'Debit' && t.date?.slice(0, 7) === key)
+      .forEach(t => {
+        const meta = catMeta.find(c => c.id === (t.categoryId || 'cat_uncategorized'));
+        if (meta) row[meta.name] = Math.round(((row[meta.name] || 0) + (t.myShare || 0)) * 100) / 100;
+      });
+    return row;
+  });
+  return { data, categories: catMeta };
+}
+
+/**
+ * Build cumulative daily spending for a month vs pro-rated budget line.
+ * Returns array of { day, label, cumulative, daily, budget? } up to today (or end of month).
+ */
+export function buildCumulativeSpend(transactions, month, budget = 0) {
+  if (!month) return [];
+  const [year, mon] = month.split('-').map(Number);
+  const daysInMonth = new Date(year, mon, 0).getDate();
+  const now = new Date();
+  const isCurrentMonth = now.getFullYear() === year && now.getMonth() + 1 === mon;
+  const lastDay = isCurrentMonth ? now.getDate() : daysInMonth;
+
+  const daily = {};
+  for (let d = 1; d <= daysInMonth; d++) daily[String(d).padStart(2, '0')] = 0;
+  transactions.forEach(t => {
+    if (t.excluded || t.transactionType !== 'Debit' || !t.date?.startsWith(month)) return;
+    const day = t.date.slice(-2);
+    if (Object.prototype.hasOwnProperty.call(daily, day)) daily[day] += t.myShare || 0;
+  });
+
+  let cum = 0;
+  const result = [];
+  for (let d = 1; d <= lastDay; d++) {
+    const key = String(d).padStart(2, '0');
+    cum += daily[key] || 0;
+    const row = { day: d, label: `${d}`, daily: Math.round((daily[key] || 0) * 100) / 100, cumulative: Math.round(cum * 100) / 100 };
+    if (budget > 0) row.budget = Math.round((budget / daysInMonth * d) * 100) / 100;
+    result.push(row);
+  }
+  return result;
+}
+
+/**
  * Detect recurring vendors: vendors that appear in 2+ different months.
  */
 export function detectRecurringVendors(transactions) {
